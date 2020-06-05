@@ -3,6 +3,19 @@ import sys
 import struct
 import select
 
+"""
+Steps:
+  1. receive a packet at the internal net interface
+  2. map the packet to be sent in the external net interface
+  3. change the properties of the packet to be sent
+  4. send the packet
+  4.1. if some 'response' to the packet is received in the mapped external net interface
+  4.2. forward the packet to the internal net interface
+
+Helpers:
+  1. Get MAC address from socket: https://www.bitforestinfo.com/2018/01/how-to-get-mac-address-using-python.html
+"""
+
 ETH_P_ALL = 0x0003
 
 
