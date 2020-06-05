@@ -14,6 +14,7 @@ Steps:
 
 Helpers:
   1. Get MAC address from socket: https://www.bitforestinfo.com/2018/01/how-to-get-mac-address-using-python.html
+  2. How to create a template Vagrantfile: https://github.com/test-kitchen/kitchen-vagrant/blob/master/templates/Vagrantfile.erb
 """
 
 ETH_P_ALL = 0x0003
