@@ -1,23 +1,21 @@
 <?xml version='1.0' encoding='UTF-8'?>
-<scenario name="/vagrant/topology.xml">
+<scenario name="/vagrant/NAT/exemplonat.xml">
   <networks/>
   <devices>
     <device id="1" name="n1" type="host" class="" image="">
-      <position x="115" y="216" lat="47.577203296712014" lon="-122.13077240613488" alt="2.0"/>
+      <position x="68" y="78" lat="47.57845770175028" lon="-122.1314057184102" alt="2.0"/>
       <services>
         <service name="DefaultRoute"/>
-        <service name="SSH"/>
       </services>
     </device>
     <device id="2" name="n2" type="host" class="" image="">
-      <position x="509" y="218" lat="47.57718511670792" lon="-122.12546336280576" alt="2.0"/>
+      <position x="560" y="86" lat="47.57838498343822" lon="-122.12477615161339" alt="2.0"/>
       <services>
         <service name="DefaultRoute"/>
-        <service name="SSH"/>
       </services>
     </device>
     <device id="3" name="n3" type="router" class="" image="">
-      <position x="312" y="115" lat="47.578121378710385" lon="-122.12811788447031" alt="2.0"/>
+      <position x="310" y="77" lat="47.57846679153218" lon="-122.12814483392884" alt="2.0"/>
       <services>
         <service name="UserDefined"/>
       </services>
@@ -25,13 +23,13 @@
   </devices>
   <links>
     <link node_one="1" node_two="3">
-      <interface_one id="0" name="eth0" mac="00:00:00:aa:00:00" ip4="10.0.0.10" ip4_mask="24"/>
-      <interface_two id="0" name="eth0" mac="00:00:00:aa:00:01" ip4="10.0.0.1" ip4_mask="24"/>
+      <interface_one id="0" name="eth0" mac="00:00:00:aa:00:08" ip4="10.0.0.10" ip4_mask="24"/>
+      <interface_two id="0" name="eth0" mac="00:00:00:aa:00:09" ip4="10.0.0.1" ip4_mask="24"/>
       <options delay="0" bandwidth="0" per="0.0" dup="0" jitter="0" type="1" unidirectional="0"/>
     </link>
     <link node_one="3" node_two="2">
-      <interface_one id="1" name="eth1" mac="00:00:00:aa:00:02" ip4="10.0.1.1" ip4_mask="24"/>
-      <interface_two id="0" name="eth0" mac="00:00:00:aa:00:03" ip4="10.0.1.10" ip4_mask="24"/>
+      <interface_one id="1" name="eth1" mac="00:00:00:aa:00:0a" ip4="10.0.1.1" ip4_mask="24"/>
+      <interface_two id="0" name="eth0" mac="00:00:00:aa:00:0b" ip4="10.0.1.10" ip4_mask="24"/>
       <options delay="0" bandwidth="0" per="0.0" dup="0" jitter="0" type="1" unidirectional="0"/>
     </link>
   </links>
@@ -51,6 +49,8 @@
   <session_metadata>
     <configuration name="canvas c1" value="{name {Canvas1}}"/>
     <configuration name="global_options" value="interface_names=yes ip_addresses=yes ipv6_addresses=no node_labels=yes link_labels=yes show_api=no background_images=no annotations=yes grid=yes traffic_start=0"/>
+    <configuration name="annotation a1" value="{iconcoords {132.0 28.0}} {type text} {label {INTERNA}} {labelcolor black} {fontfamily {Arial}} {fontsize 12} {canvas c1}"/>
+    <configuration name="annotation a2" value="{iconcoords {405.0 27.0}} {type text} {label {EXTERNA}} {labelcolor black} {fontfamily {Arial}} {fontsize 12} {canvas c1}"/>
   </session_metadata>
   <default_services>
     <node type="mdr">
