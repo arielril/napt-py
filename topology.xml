@@ -51,6 +51,8 @@
   <session_metadata>
     <configuration name="canvas c1" value="{name {Canvas1}}"/>
     <configuration name="global_options" value="interface_names=yes ip_addresses=yes ipv6_addresses=no node_labels=yes link_labels=yes show_api=no background_images=no annotations=yes grid=yes traffic_start=0"/>
+    <configuration name="annotation a1" value="{iconcoords {85.0 280.0}} {type text} {label {PRIVATE}} {labelcolor black} {fontfamily {Arial}} {fontsize 12} {canvas c1}"/>
+    <configuration name="annotation a2" value="{iconcoords {474.0 284.0}} {type text} {label {PUBLIC}} {labelcolor black} {fontfamily {Arial}} {fontsize 12} {canvas c1}"/>
   </session_metadata>
   <default_services>
     <node type="mdr">
