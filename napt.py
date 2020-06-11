@@ -21,6 +21,7 @@ Helpers:
 """
 
 ETH_P_ALL = 0x0003
+ETH_P_IP = 0x0800
 ETH_LEN = 14
 
 
@@ -43,185 +44,97 @@ def isIP(eth) -> bool:
     return eth[2] == 2048
 
 
-if __name__ == '__main__':
-    print('wasuuuuppp')
+# def getWritableSocketFromPacket(packet):
+#     wrt_sock = getSocketByProto(socket.getprotobyname('icmp'))
+#     return wrt_sock
 
+
+def showPacket(packet):
+    eth_header = packet[:ETH_LEN]
+    eth = struct.unpack('!6s6sH', eth_header)
+
+    print('MAC Src: '+bytes_to_mac(eth[1]))
+    print('MAC Dst: '+bytes_to_mac(eth[0]))
+    print('Type: '+hex(eth[2]))
+    print('{0}'.format(eth[2]))
+
+
+if __name__ == '__main__':
     # Create 2 sockets, one for each interface eth0 and eth1
     try:
         sniff_socket = socket.socket(socket.AF_PACKET, socket.SOCK_RAW,
-                                     socket.ntohs(ETH_P_ALL))
+                                     socket.ntohs(ETH_P_IP))
         sniff_socket.bind(('eth0', 0))
-        print('sniff sock', sniff_socket)
-        # deliv_socket = socket.socket(socket.AF_PACKET, socket.SOCK_RAW,
-        #                              socket.ntohs(ETH_P_ALL))
-        # deliv_socket.bind(('eth1', 0))
+        ext_sniff = socket.socket(socket.AF_PACKET, socket.SOCK_RAW,
+                                  socket.ntohs(ETH_P_IP))
+        ext_sniff.bind(('eth1', 0))
     except OSError as msg:
         print('Error'+str(msg))
         sys.exit(1)
 
     print('Sockets created!')
 
-    inputs = [sniff_socket]
+    inputs = [sniff_socket, ext_sniff]
     outputs = []
     message_queues = {}
 
     while inputs:
         readable, writable, exceptional = select.select(
             inputs, outputs, inputs)
+
         for s in readable:
-            if s == sniff_socket:
-                conn, client_addr = s.accept()
-                conn.setblocking(0)
-                inputs.append(conn)
-
-                message_queues[conn] = Queue()
-            else:
-                (packet, addr) = s.recvfrom(65536)
-
-                eth_header = packet[:ETH_LEN]
-                eth = struct.unpack('!6s6sH', eth_header)
-
-                if isIP(eth):
-                    ip_packet = packet[ETH_LEN:]
-
-                    destination_sock = getSocketByProto()
-                    ip_unpack = struct.unpack(
-                        '!BBHHHBBH4s4s', packet[ETH_LEN:20+ETH_LEN])
-
-                    if destination_sock not in message_queues.keys():
-                        message_queues[destination_sock] = Queue()
-
-                    ip_dest = socket.inet_ntoa(ip_unpack[9])
-                    msg = dict({
-                        'pkt': ip_packet,
-                        'ip_dest': ip_dest,
-                    })
-                    message_queues[destination_sock].put(msg)
-
-                    if destination_sock not in outputs:
-                        outputs.append(destination_sock)
-
-        for w in writable:
-            try:
-                next_msg = message_queues[w].get_nowait()
-            except queue.Empty:
-                print('output %s is empty'.format(w.getpeername()))
-                outputs.remove(w)
-            else:
-                w.send(next_msg)
-
-            """
-
-            Best one
-
-
-            (packet, addr) = s.recvfrom(65536)
-
+            packet = s.recv(2048)
+            print('received', packet)
             eth_header = packet[:ETH_LEN]
+
             eth = struct.unpack('!6s6sH', eth_header)
+
+            nexthdr = packet[ETH_LEN:]
 
             if isIP(eth):
                 if s is sniff_socket:
-                    # * if the sniffer capture some traffic
-                    # * we create a new socket and passthrough the packet sent from the priv net to the pub net
-                    ip_packet = packet[ETH_LEN:]
+                    deliv_socket = socket.socket(
+                        socket.AF_INET, socket.SOCK_RAW, socket.htons(ETH_P_IP))
+                    deliv_socket.setsockopt(
+                        socket.IPPROTO_IP, socket.IP_HDRINCL, 1)
+                    deliv_socket.bind(('10.0.1.1', 0))
 
-                    destination_sock = getSocketByProto()
-                    print('dest sock from sniff', destination_sock)
                     ip_unpack = struct.unpack(
                         '!BBHHHBBH4s4s', packet[ETH_LEN:20+ETH_LEN])
-
                     ip_dest = socket.inet_ntoa(ip_unpack[9])  # PUB NET
 
-                    if destination_sock not in message_queues.keys():
-                        message_queues[destination_sock] = Queue()
+                    if deliv_socket not in message_queues.keys():
+                        message_queues[deliv_socket] = Queue()
 
-                    msg = dict({
-                        'pkt': ip_packet,
-                        'ip_dest': ip_dest,
-                        'src': 'sniff',
+                    message_queues[deliv_socket].put({
+                        'pkt': nexthdr,
+                        'dest': (ip_dest, 0),
                     })
-                    message_queues[destination_sock].put(msg)
-                    print('sniff added message', msg)
+                    outputs.append(deliv_socket)
 
-                    if destination_sock not in outputs:
-                        outputs.append(destination_sock)
-                else:
-                    ip_packet = packet[ETH_LEN:]
-
-                    host_dest_sock = getSocketByProto()
-                    print('new socket not sniff', host_dest_sock)
-                    if host_dest_sock not in message_queues.keys():
-                        message_queues[host_dest_sock] = Queue()
+                elif s is ext_sniff:
+                    deliv_socket = socket.socket(
+                        socket.AF_INET, socket.SOCK_RAW, socket.htons(ETH_P_IP))
+                    deliv_socket.setsockopt(
+                        socket.IPPROTO_IP, socket.IP_HDRINCL, 1)
+                    deliv_socket.bind(('10.0.0.1', 0))
 
                     ip_unpack = struct.unpack(
                         '!BBHHHBBH4s4s', packet[ETH_LEN:20+ETH_LEN])
-
                     ip_dest = socket.inet_ntoa(ip_unpack[9])  # PRIV NET
 
-                    msg = dict({
-                        'pkt': ip_packet,
-                        'ip_dest': ip_dest,
+                    if deliv_socket not in message_queues.keys():
+                        message_queues[deliv_socket] = Queue()
+
+                    message_queues[deliv_socket].put({
+                        'pkt': nexthdr,
+                        'dest': (ip_dest, 0),
                     })
-                    message_queues[host_dest_sock].put(msg)
-                    print('read msg from other socket (no sniff)', msg)
 
-                    if host_dest_sock not in outputs:
-                        outputs.append(host_dest_sock)
+                    outputs.append(deliv_socket)
 
-        for w in writable:
-            try:
-                print('writing...', w)
-                next_msg = message_queues[w].get_nowait()
-            except queue.Empty:
-                print('no more messages to send')
-                outputs.remove(w)
-            else:
-                # print('sending message from writable')
-                # print('dat', next_msg['pkt'])
-                # print('ip', next_msg['ip_dest'])
-                w.sendto(next_msg['pkt'], (next_msg['ip_dest'], 0))
-                print('sent message', next_msg)
-                # del message_queues[w]
-
-                # * wait for the pub net write in the socket
-                inputs.append(w)
-"""
-            """
-            (packet, addr) = s.recvfrom(65536)
-
-            eth_length = 14
-            eth_header = packet[:14]
-
-            eth = struct.unpack('!6s6sH', eth_header)
-
-            interface = 'eth0' if s is sniff_socket else 'eth1'
-            print('Received from '+interface)
-            print('MAC Dst: '+bytes_to_mac(eth[0]))
-            print('MAC Src: '+bytes_to_mac(eth[1]))
-            print('Type: '+hex(eth[2]))
-            print('{0}'.format(eth[2]))
-
-            nexthdr = packet[14:]
-
-            if s is sniff_socket:  # eth0 - 00:00:00:aa:00:01
-                if eth[2] == 2048:  # IP
-                    deliv_socket.send(packet)
-
-                    ds = getSocketByProto()
-
-                    ip_unpack = struct.unpack(
-                        '!BBHHHBBH4s4s', packet[eth_length:20+eth_length])
-
-                    # ip_source = socket.inet_ntoa(ip_unpack[8]) PRIV NET
-                    ip_dest = socket.inet_ntoa(ip_unpack[9])  # PUB NET
-
-                    ds.sendto(nexthdr, (ip_dest, 0))
-
-                    # after send the pkt we expect to read from it later
-                    inputs.append(ds)
-            else:
-                if eth[2] == 2048:  # IP
+                else:
+                    print('not sniff')
                     # Header Ethernet
                     # MAC Destino - 6 bytes
                     dest_mac = b'\x00\x00\x00\xaa\x00\x00'
@@ -234,4 +147,19 @@ if __name__ == '__main__':
 
                     packet = eth_hdr+nexthdr
                     sniff_socket.send(packet)
-"""
+
+        for w in writable:
+            try:
+                msg = message_queues[w].get_nowait()
+            except queue.Empty:
+                # no more messages from w
+                outputs.remove(w)
+            else:
+                w.sendto(msg['pkt'], msg['dest'])
+
+        for e in exceptional:
+            inputs.remove(e)
+            if e in outputs:
+                outputs.remove(e)
+            e.close()
+            del message_queues[e]
