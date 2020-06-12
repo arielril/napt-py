@@ -84,46 +84,6 @@ def getPacketWithRedirect(old_pkt: bytes, to_ip_src: str, to_ip_dst: str, to_por
     ip_saddr = socket.inet_aton(to_ip_src)
     ip_daddr = socket.inet_aton(to_ip_dst)
 
-    rest_pkt = old_pkt[20:]
-
-    if to_port_src:
-        rest_pkt_unpacked = struct.unpack('!HHLLBBHHH', old_pkt[20:40])
-
-        packet = struct.pack(
-            '!HHLLBBHHH',
-            to_port_src,
-            rest_pkt_unpacked[1],  # dest port
-            0,  # seq num
-            0,  # ack num
-            rest_pkt_unpacked[4],  # header len + res
-            0,  # flags
-            rest_pkt_unpacked[6],  # window size
-            0,  # checksum
-            0,  # urgent point
-        )
-
-        pseudo_tcp_hdr = struct.pack(
-            '!4s4sHH',
-            ip_saddr,
-            ip_daddr,
-            socket.IPPROTO_TCP,
-            len(packet)+len(old_pkt[40:]),
-        )
-        checksum = getChecksum(pseudo_tcp_hdr+packet)
-
-        packet = struct.pack(
-            '!HHLLBBH',
-            to_port_src,
-            rest_pkt_unpacked[1],  # dest port
-            rest_pkt_unpacked[2],  # seq num
-            rest_pkt_unpacked[3],  # ack num
-            rest_pkt_unpacked[4],  # data offset
-            rest_pkt_unpacked[5],  # flags
-            rest_pkt_unpacked[6],  # window
-        )+struct.pack('H', checksum)+struct.pack('!H', rest_pkt_unpacked[8])
-
-        rest_pkt = packet+old_pkt[40:]
-
     newPkt = struct.pack(
         '!BBHHHBBH4s4s',
         ip_unpack[0],
@@ -137,6 +97,49 @@ def getPacketWithRedirect(old_pkt: bytes, to_ip_src: str, to_ip_dst: str, to_por
         ip_saddr,
         ip_daddr,
     )
+
+    rest_pkt = old_pkt[20:]
+
+    if to_port_src:
+        rest_pkt_unpacked = struct.unpack('!HHLLBBHHH', old_pkt[20:40])
+
+        packet = struct.pack(
+            '!HHLLBBHHH',
+            to_port_src,  # src port
+            rest_pkt_unpacked[1],  # dest port
+            rest_pkt_unpacked[2],  # seq num
+            rest_pkt_unpacked[3],  # ack num
+            rest_pkt_unpacked[4],  # header len + res
+            rest_pkt_unpacked[5],  # flags
+            rest_pkt_unpacked[6],  # window size
+            0,  # checksum
+            rest_pkt_unpacked[8],  # urgent point
+        )
+
+        pseudo_tcp_hdr = struct.pack(
+            '!4s4sBBH',
+            ip_saddr,
+            ip_daddr,
+            0,
+            socket.IPPROTO_TCP,
+            struct.calcsize('!HHLLBBHHH')+len(old_pkt[40:]),
+        )
+        checksum = getChecksum(pseudo_tcp_hdr+packet+old_pkt[40:])
+
+        packet = struct.pack(
+            '!HHLLBBHHH',
+            to_port_src,
+            rest_pkt_unpacked[1],  # dest port
+            rest_pkt_unpacked[2],  # seq num
+            rest_pkt_unpacked[3],  # ack num
+            rest_pkt_unpacked[4],  # data offset
+            rest_pkt_unpacked[5],  # flags
+            rest_pkt_unpacked[6],  # window size
+            checksum,
+            rest_pkt_unpacked[8],
+        )
+
+        rest_pkt = packet+old_pkt[40:]
 
     return newPkt+rest_pkt
 
