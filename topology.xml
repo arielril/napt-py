@@ -1,37 +1,72 @@
 <?xml version='1.0' encoding='UTF-8'?>
 <scenario name="/vagrant/topology.xml">
-  <networks/>
+  <networks>
+    <network id="4" name="n4" type="SWITCH">
+      <position x="120" y="118" lat="47.578094109180036" lon="-122.13070503248858" alt="2.0"/>
+    </network>
+    <network id="5" name="n5" type="SWITCH">
+      <position x="544" y="121" lat="47.57806683963548" lon="-122.12499174728158" alt="2.0"/>
+    </network>
+  </networks>
   <devices>
     <device id="1" name="n1" type="host" class="" image="">
-      <position x="115" y="216" lat="47.577203296712014" lon="-122.13077240613488" alt="2.0"/>
+      <position x="61" y="256" lat="47.5768396954308" lon="-122.13150004151503" alt="2.0"/>
       <services>
         <service name="DefaultRoute"/>
         <service name="SSH"/>
       </services>
     </device>
     <device id="2" name="n2" type="host" class="" image="">
-      <position x="509" y="218" lat="47.57718511670792" lon="-122.12546336280576" alt="2.0"/>
+      <position x="439" y="293" lat="47.576503361997716" lon="-122.12640659385406" alt="2.0"/>
       <services>
         <service name="DefaultRoute"/>
         <service name="SSH"/>
       </services>
     </device>
     <device id="3" name="n3" type="router" class="" image="">
-      <position x="312" y="115" lat="47.578121378710385" lon="-122.12811788447031" alt="2.0"/>
+      <position x="334" y="210" lat="47.57725783668642" lon="-122.12782144042657" alt="2.0"/>
       <services>
         <service name="UserDefined"/>
       </services>
     </device>
+    <device id="6" name="n6" type="host" class="" image="">
+      <position x="203" y="278" lat="47.57663971364989" lon="-122.12958662995985" alt="2.0"/>
+      <services>
+        <service name="DefaultRoute"/>
+        <service name="SSH"/>
+      </services>
+    </device>
+    <device id="7" name="n7" type="host" class="" image="">
+      <position x="589" y="294" lat="47.57649427187494" lon="-122.12438538446482" alt="2.0"/>
+      <services>
+        <service name="DefaultRoute"/>
+        <service name="SSH"/>
+      </services>
+    </device>
   </devices>
   <links>
-    <link node_one="1" node_two="3">
-      <interface_one id="0" name="eth0" mac="00:00:00:aa:00:00" ip4="10.0.0.10" ip4_mask="24"/>
-      <interface_two id="0" name="eth0" mac="00:00:00:aa:00:01" ip4="10.0.0.1" ip4_mask="24"/>
+    <link node_one="4" node_two="3">
+      <interface_two id="0" name="eth0" mac="00:00:00:aa:00:15" ip4="10.0.0.1" ip4_mask="24" ip6="2001::1" ip6_mask="64"/>
       <options delay="0" bandwidth="0" per="0.0" dup="0" jitter="0" type="1" unidirectional="0"/>
     </link>
-    <link node_one="3" node_two="2">
-      <interface_one id="1" name="eth1" mac="00:00:00:aa:00:02" ip4="10.0.1.1" ip4_mask="24"/>
-      <interface_two id="0" name="eth0" mac="00:00:00:aa:00:03" ip4="10.0.1.10" ip4_mask="24"/>
+    <link node_one="4" node_two="1">
+      <interface_two id="0" name="eth0" mac="00:00:00:aa:00:16" ip4="10.0.0.10" ip4_mask="24" ip6="2001::10" ip6_mask="64"/>
+      <options delay="0" bandwidth="0" per="0.0" dup="0" jitter="0" type="1" unidirectional="0"/>
+    </link>
+    <link node_one="4" node_two="6">
+      <interface_two id="0" name="eth0" mac="00:00:00:aa:00:17" ip4="10.0.0.11" ip4_mask="24" ip6="2001::11" ip6_mask="64"/>
+      <options delay="0" bandwidth="0" per="0.0" dup="0" jitter="0" type="1" unidirectional="0"/>
+    </link>
+    <link node_one="5" node_two="3">
+      <interface_two id="1" name="eth1" mac="00:00:00:aa:00:18" ip4="10.0.1.1" ip4_mask="24" ip6="2001:1::1" ip6_mask="64"/>
+      <options delay="0" bandwidth="0" per="0.0" dup="0" jitter="0" type="1" unidirectional="0"/>
+    </link>
+    <link node_one="5" node_two="2">
+      <interface_two id="0" name="eth0" mac="00:00:00:aa:00:19" ip4="10.0.1.10" ip4_mask="24" ip6="2001:1::10" ip6_mask="64"/>
+      <options delay="0" bandwidth="0" per="0.0" dup="0" jitter="0" type="1" unidirectional="0"/>
+    </link>
+    <link node_one="5" node_two="7">
+      <interface_two id="0" name="eth0" mac="00:00:00:aa:00:1a" ip4="10.0.1.11" ip4_mask="24" ip6="2001:1::11" ip6_mask="64"/>
       <options delay="0" bandwidth="0" per="0.0" dup="0" jitter="0" type="1" unidirectional="0"/>
     </link>
   </links>
@@ -51,8 +86,8 @@
   <session_metadata>
     <configuration name="canvas c1" value="{name {Canvas1}}"/>
     <configuration name="global_options" value="interface_names=yes ip_addresses=yes ipv6_addresses=no node_labels=yes link_labels=yes show_api=no background_images=no annotations=yes grid=yes traffic_start=0"/>
-    <configuration name="annotation a1" value="{iconcoords {85.0 280.0}} {type text} {label {PRIVATE}} {labelcolor black} {fontfamily {Arial}} {fontsize 12} {canvas c1}"/>
-    <configuration name="annotation a2" value="{iconcoords {474.0 284.0}} {type text} {label {PUBLIC}} {labelcolor black} {fontfamily {Arial}} {fontsize 12} {canvas c1}"/>
+    <configuration name="annotation a1" value="{iconcoords {7.0 66.0 311.0 357.0}} {type oval} {label {PRIVATE}} {labelcolor black} {fontfamily {Arial}} {fontsize {12}} {color #bccfa4} {width 0} {border black} {canvas c1}"/>
+    <configuration name="annotation a2" value="{iconcoords {355.0 54.0 673.0 372.0}} {type oval} {label {PUBLIC}} {labelcolor black} {fontfamily {Arial}} {fontsize {12}} {color #CFCFFF} {width 0} {border black} {canvas c1}"/>
   </session_metadata>
   <default_services>
     <node type="mdr">

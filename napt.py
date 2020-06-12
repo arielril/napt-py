@@ -26,23 +26,17 @@ ETH_P_ALL = 0x0003
 ETH_P_IP = 0x0800
 ETH_LEN = 14
 
-
-# napt_table = list(dict({
-#     "protocol": "",
-#     "ip_src": "",
-#     "ip_dst": "",
-#     "port_src": "",
-#     "port_dst": "",
-# }))
+TCP_INIT_PORT = 40000
+UDP_INIT_PORT = 5000
 
 """
-    protocol: str
     ip_src: str
     ip_dst: str
-    icmp_pid: int | None
-    imcp_seqid: int | None
+    port_src: int | None
+    port_dst: int | None
+    port_tlt: int | None
 """
-db = list()
+napt_table = list()
 
 
 def isIP(eth) -> bool:
@@ -56,16 +50,79 @@ def isIcmp(ip_packet: bytes) -> bool:
     return ip_unpack[6] == 1
 
 
-def getPacketWithRedirect(old_pkt: bytes, to_ip_src: str, to_ip_dst: str) -> bytes:
-    rest_pkt = old_pkt[20:]
+def isTCP(ip_packet: bytes) -> bool:
     ip_unpack = struct.unpack(
-        '!BBHHHBBH4s4s', old_pkt[:20])
+        '!BBHHHBBH4s4s', ip_packet[:20])
 
-    if to_ip_src == None:
+    return ip_unpack[6] == 6
+
+
+def isUDP(ip_packet: bytes) -> bool:
+    ip_unpack = struct.unpack(
+        '!BBHHHBBH4s4s', ip_packet[:20])
+
+    return ip_unpack[6] == 50
+
+
+def getChecksum(msg: bytes) -> int:
+    s = 0
+    msg = (msg + b'\x00') if len(msg) % 2 else msg
+    for i in range(0, len(msg), 2):
+        w = msg[i] + (msg[i+1] << 8)
+        s = s + w
+        s = (s & 0xffff) + (s >> 16)
+    s = ~s & 0xffff
+    return socket.ntohs(s)
+
+
+def getPacketWithRedirect(old_pkt: bytes, to_ip_src: str, to_ip_dst: str, to_port_src: int = None) -> bytes:
+    ip_unpack = struct.unpack('!BBHHHBBH4s4s', old_pkt[:20])
+
+    if not to_ip_src:
         to_ip_src = socket.inet_ntoa(ip_unpack[8])
 
     ip_saddr = socket.inet_aton(to_ip_src)
     ip_daddr = socket.inet_aton(to_ip_dst)
+
+    rest_pkt = old_pkt[20:]
+
+    if to_port_src:
+        rest_pkt_unpacked = struct.unpack('!HHLLBBHHH', old_pkt[20:40])
+
+        packet = struct.pack(
+            '!HHLLBBHHH',
+            to_port_src,
+            rest_pkt_unpacked[1],  # dest port
+            0,  # seq num
+            0,  # ack num
+            rest_pkt_unpacked[4],  # header len + res
+            0,  # flags
+            rest_pkt_unpacked[6],  # window size
+            0,  # checksum
+            0,  # urgent point
+        )
+
+        pseudo_tcp_hdr = struct.pack(
+            '!4s4sHH',
+            ip_saddr,
+            ip_daddr,
+            socket.IPPROTO_TCP,
+            len(packet)+len(old_pkt[40:]),
+        )
+        checksum = getChecksum(pseudo_tcp_hdr+packet)
+
+        packet = struct.pack(
+            '!HHLLBBH',
+            to_port_src,
+            rest_pkt_unpacked[1],  # dest port
+            rest_pkt_unpacked[2],  # seq num
+            rest_pkt_unpacked[3],  # ack num
+            rest_pkt_unpacked[4],  # data offset
+            rest_pkt_unpacked[5],  # flags
+            rest_pkt_unpacked[6],  # window
+        )+struct.pack('H', checksum)+struct.pack('!H', rest_pkt_unpacked[8])
+
+        rest_pkt = packet+old_pkt[40:]
 
     newPkt = struct.pack(
         '!BBHHHBBH4s4s',
@@ -84,55 +141,73 @@ def getPacketWithRedirect(old_pkt: bytes, to_ip_src: str, to_ip_dst: str) -> byt
     return newPkt+rest_pkt
 
 
-def addRedirected(protocol: str, ip_src: str, ip_dst: str, icmp_pid: int = None, icmp_seqid: int = None):
-    dbval = dict({
-        'protocol': protocol,
+def addRedirected(ip_src: str, ip_dst: str, port_src: int = None, port_dst: int = None, port_tlt: int = None):
+    napt_row = dict({
         'ip_src': ip_src,
         'ip_dst': ip_dst,
-        'icmp_pid': icmp_pid,
-        'icmp_seqid': icmp_seqid,
+        'port_src': port_src,
+        'port_dst': port_dst,
+        'port_tlt': port_tlt,
     })
-    db.append(dbval)
+    napt_table.append(napt_row)
 
 
 def addRedirectedICMP(ip_src: str, ip_dst: str, ip_packet: bytes):
-    unpack = struct.unpack('!BBHHH', ip_packet[20:28])
-    icmp_pid = unpack[3]
-    icmp_seqid = unpack[4]
-
-    addRedirected('icmp', ip_src, ip_dst, icmp_pid, icmp_seqid)
+    addRedirected(ip_src, ip_dst)
 
 
-def getInternalRequestFromExtPacket(ip_packet: bytes) -> dict:
-    ip_unpack = struct.unpack('!BBHHHBBH4s4s', ip_packet[:20])
+def addRedirectedTCP(ip_src: str, ip_dst: str, port_src: int, port_dst: int, port_translated: int) -> None:
+    addRedirected(ip_src, ip_dst, port_src, port_dst)
+
+
+def getInternalRequestFromExtPacket(ext_ip_packet: bytes) -> dict:
+    ip_unpack = struct.unpack('!BBHHHBBH4s4s', ext_ip_packet[:20])
     priv_ip_src_pkt = None
-    # ! IP_SRC PARAM FROM PUB NET
+    # ! IP_SRC FROM PUB NET PKT
     priv_ip_dest_pkt = socket.inet_ntoa(ip_unpack[8])
-    icmp_pid = None
-    icmp_seqid = None
-    protocol = None
+    # ! PORT_SRC FROM PUB NET PKT
+    priv_port_dst_pkt = None
+    # ! PORT_DST FROM PUB NET PKT
+    pub_port_tlt_pkt = None
 
-    if isIcmp(ip_packet):
-        icmp_unpack = struct.unpack('!BBHHH', ip_packet[20:28])
-        icmp_pid = icmp_unpack[3]
-        icmp_seqid = icmp_unpack[4]
-        protocol = 'icmp'
+    if isTCP(ext_ip_packet) or isUDP(ext_ip_packet):
+        tp_unpack = struct.unpack('!HH', ext_ip_packet[20:24])
+        # source port
+        priv_port_dst_pkt = tp_unpack[0]
+        # dest port
+        pub_port_tlt_pkt = tp_unpack[1]
 
     result = None
-
-    for val in db:
-        if val['protocol'] == protocol \
-                and val['ip_dst'] == priv_ip_dest_pkt \
-                and val['icmp_pid'] == icmp_pid \
-                and val['icmp_seqid'] == icmp_seqid:
+    for val in napt_table:
+        if val['ip_dst'] == priv_ip_dest_pkt \
+                and val['port_src'] == priv_port_dst_pkt \
+                and val['port_tlt'] == pub_port_tlt_pkt:
             result = val
             break
 
     if result:
         # consume the response
-        db.remove(val)
+        napt_table.remove(val)
 
     return result
+
+
+def getOpenPort(protocol: str = 'tcp') -> int:
+    tcp_ports = []
+
+    for val in napt_table:
+        if val and val['port_tlt']:
+            tcp_ports.append(val['port_tlt'])
+
+    tcp_ports.sort()
+
+    last_port = TCP_INIT_PORT
+
+    for p in tcp_ports:
+        if p > last_port:
+            last_port = p
+
+    return last_port+1
 
 
 if __name__ == '__main__':
@@ -169,9 +244,7 @@ if __name__ == '__main__':
                 del message_queues[s]
 
             eth_header = packet[:ETH_LEN]
-
             eth = struct.unpack('!6s6sH', eth_header)
-
             ip_packet = packet[ETH_LEN:]
 
             if s is sniff_socket:
@@ -195,11 +268,17 @@ if __name__ == '__main__':
                             message_queues[nsock] = Queue()
 
                         addRedirectedICMP(ip_source, ip_dest, ip_packet)
+                        print('translating s: ({}, {}) => ({}, {}) to ({},{}) => ({},{})'.format(
+                            ip_source, 0,
+                            ip_dest, 0,
+                            '10.0.1.1', 0,
+                            ip_dest, 0,
+                        ))
                         msg = {
                             'pkt': ip_packet,
                             'dest': (ip_dest, 0),
-                            'redirect': True,
-                            'set_dest': False,
+                            'priv_to_pub': True,
+                            'redirect_port': None,
                         }
 
                         message_queues[nsock].put(msg)
@@ -208,7 +287,43 @@ if __name__ == '__main__':
 
                     else:
                         # * handle TCP and UDP
-                        print('TCP bitcheee')
+                        nsock = socket.socket(
+                            socket.AF_INET, socket.SOCK_RAW, socket.htons(ETH_P_IP))
+                        nsock.setsockopt(socket.IPPROTO_IP,
+                                         socket.IP_HDRINCL, 1)
+
+                        ip_unpack = struct.unpack(
+                            '!BBHHHBBH4s4s', ip_packet[:20])
+                        ip_source = socket.inet_ntoa(ip_unpack[8])  # PRIV NET
+                        ip_dest = socket.inet_ntoa(ip_unpack[9])  # PUB NET
+
+                        port_unpack = struct.unpack('!HH', ip_packet[20:24])
+                        port_source = port_unpack[0]
+                        port_dest = port_unpack[1]
+
+                        if nsock not in message_queues.keys():
+                            message_queues[nsock] = Queue()
+
+                        port_translated = getOpenPort('tcp')
+                        addRedirectedTCP(
+                            ip_source, ip_dest, port_source, port_dest, port_translated)
+
+                        print('translating s: ({}, {}) => ({}, {}) to ({},{}) => ({},{})'.format(
+                            ip_source, port_source,
+                            ip_dest, port_dest,
+                            '10.0.1.1', port_translated,
+                            ip_dest, port_dest,
+                        ))
+
+                        msg = {
+                            'pkt': ip_packet,
+                            'dest': (ip_dest, port_dest),
+                            'priv_to_pub': True,
+                            'redirect_port': port_translated,
+                        }
+                        message_queues[nsock].put(msg)
+                        # inputs.append(nsock)
+                        outputs.append(nsock)
 
             else:
                 # * not the initial connection
@@ -221,20 +336,42 @@ if __name__ == '__main__':
                         socket.AF_INET, socket.SOCK_RAW, socket.htons(ETH_P_IP))
                     nsock.setsockopt(socket.IPPROTO_IP, socket.IP_HDRINCL, 1)
 
-                    fromDB = getInternalRequestFromExtPacket(ip_packet)
+                    ip_unpack = struct.unpack(
+                        '!BBHHHBBH4s4s', ip_packet[:20])
+                    pkt_ip_source = socket.inet_ntoa(ip_unpack[8])  # PRIV NET
+                    pkt_ip_dest = socket.inet_ntoa(ip_unpack[9])  # PUB NET
 
-                    if not fromDB:
+                    port_unpack = struct.unpack('!HH', ip_packet[20:24])
+                    pkt_port_source = port_unpack[0]
+                    pkt_port_dest = port_unpack[1]
+
+                    fromNaptTable = getInternalRequestFromExtPacket(ip_packet)
+
+                    if not fromNaptTable:
+                        print('\nrequest to response not found in db')
                         continue
 
                     if nsock not in message_queues.keys():
                         message_queues[nsock] = Queue()
 
-                    ip_dest = fromDB['ip_src']
+                    ip_dest = fromNaptTable['ip_src']
+                    port_dest = 0
+
+                    if fromNaptTable['port_src']:
+                        port_dest = fromNaptTable['port_src']
+
+                    print('translating ns: ({}, {}) => ({}, {}) to ({},{}) => ({},{})'.format(
+                        pkt_ip_source, pkt_port_source,
+                        pkt_ip_dest, pkt_port_dest,
+                        pkt_ip_source, pkt_port_source,
+                        ip_dest, port_dest,
+                    ))
+
                     msg = {
                         'pkt': ip_packet,
-                        'dest': (ip_dest, 0),
-                        'redirect': False,
-                        'set_dest': True,
+                        'dest': (ip_dest, port_dest),
+                        'priv_to_pub': False,
+                        'redirect_port': port_dest,
                     }
                     message_queues[nsock].put(msg)
 
@@ -244,17 +381,22 @@ if __name__ == '__main__':
             try:
                 msg = message_queues[w].get_nowait()
 
-                if msg['redirect']:
-                    msg['pkt'] = getPacketWithRedirect(
-                        msg['pkt'], '10.0.1.1', msg['dest'][0])
-                if msg['set_dest']:
-                    msg['pkt'] = getPacketWithRedirect(
-                        msg['pkt'], None, msg['dest'][0])
+                if msg['priv_to_pub']:
+                    new_ip_src = '10.0.1.1'
+                    new_port_src = msg['redirect_port']
+                else:
+                    new_ip_src = None
+                    new_port_src = msg['redirect_port']
+
+                msg['pkt'] = getPacketWithRedirect(
+                    msg['pkt'], new_ip_src, msg['dest'][0], new_port_src)
 
             except queue.Empty as e:
                 # no more messages from w
                 outputs.remove(w)
             else:
+                print('Sending msg to ({}, {})'.format(
+                    msg['dest'][0], msg['dest'][1]))
                 w.sendto(msg['pkt'], msg['dest'])
 
         for e in exceptional:
