@@ -26,7 +26,7 @@ ETH_P_ALL = 0x0003
 ETH_P_IP = 0x0800
 ETH_LEN = 14
 
-TCP_INIT_PORT = 40000
+TCP_INIT_PORT = 4000
 UDP_INIT_PORT = 5000
 
 """
@@ -76,6 +76,8 @@ def getChecksum(msg: bytes) -> int:
 
 
 def getPacketWithRedirect(old_pkt: bytes, to_ip_src: str, to_ip_dst: str, to_port_src: int = None) -> bytes:
+    print('\nRewriting to ip_src ({}) ip_dst ({}) to_port_src ({})'.format(
+        to_ip_src, to_ip_dst, to_port_src))
     ip_unpack = struct.unpack('!BBHHHBBH4s4s', old_pkt[:20])
 
     if not to_ip_src:
@@ -159,8 +161,17 @@ def addRedirectedICMP(ip_src: str, ip_dst: str, ip_packet: bytes):
     addRedirected(ip_src, ip_dst)
 
 
-def addRedirectedTCP(ip_src: str, ip_dst: str, port_src: int, port_dst: int, port_translated: int) -> None:
-    addRedirected(ip_src, ip_dst, port_src, port_dst)
+def addRedirectedTCP(ip_src: str, ip_dst: str, port_src: int, port_dst: int, port_translated: int) -> int:
+    if len(napt_table) > 0:
+        for val in napt_table:
+            if val['ip_src'] == ip_src \
+                    and val['ip_dst'] == ip_dst \
+                    and val['port_src'] == port_src \
+                    and val['port_dst'] == port_dst:
+                print('duplicated request')
+                return val['port_tlt']
+    addRedirected(ip_src, ip_dst, port_src, port_dst, port_translated)
+    return port_translated
 
 
 def getInternalRequestFromExtPacket(ext_ip_packet: bytes) -> dict:
@@ -180,10 +191,16 @@ def getInternalRequestFromExtPacket(ext_ip_packet: bytes) -> dict:
         # dest port
         pub_port_tlt_pkt = tp_unpack[1]
 
+    print('\nsearch db',
+          priv_ip_src_pkt,
+          priv_ip_dest_pkt,
+          priv_port_dst_pkt,
+          pub_port_tlt_pkt)
     result = None
     for val in napt_table:
+        print('val', val)
         if val['ip_dst'] == priv_ip_dest_pkt \
-                and val['port_src'] == priv_port_dst_pkt \
+                and val['port_dst'] == priv_port_dst_pkt \
                 and val['port_tlt'] == pub_port_tlt_pkt:
             result = val
             break
@@ -227,7 +244,7 @@ if __name__ == '__main__':
         print('failed to create the sniffer socket'+str(msg))
         sys.exit(1)
 
-    inputs = [sniff_socket]
+    inputs = [sniff_socket, ext_sniff]
     outputs = []
     message_queues = {}
 
@@ -238,37 +255,22 @@ if __name__ == '__main__':
         for s in readable:
             (packet, addr) = s.recvfrom(65536)
 
-            if not packet and not s is sniff_socket:
-                if s in outputs:
-                    outputs.remove(s)
-                inputs.remove(s)
-                s.close()
-
-                del message_queues[s]
-
             eth_header = packet[:ETH_LEN]
             eth = struct.unpack('!6s6sH', eth_header)
             ip_packet = packet[ETH_LEN:]
 
             if s is sniff_socket:
 
-                # * Handle ICMP "connections"
                 if isIP(eth):
 
                     if isIcmp(ip_packet):
-                        nsock = socket.socket(
-                            socket.AF_INET, socket.SOCK_RAW, socket.htons(ETH_P_IP))
-                        nsock.setsockopt(
-                            socket.IPPROTO_IP, socket.IP_HDRINCL, 1)
+                        # * Handle ICMP "connections"
 
                         ip_unpack = struct.unpack(
                             '!BBHHHBBH4s4s', ip_packet[:20])
 
                         ip_source = socket.inet_ntoa(ip_unpack[8])  # PRIV NET
                         ip_dest = socket.inet_ntoa(ip_unpack[9])  # PUB NET
-
-                        if nsock not in message_queues.keys():
-                            message_queues[nsock] = Queue()
 
                         addRedirectedICMP(ip_source, ip_dest, ip_packet)
                         print('translating s: ({}, {}) => ({}, {}) to ({},{}) => ({},{})'.format(
@@ -284,16 +286,20 @@ if __name__ == '__main__':
                             'redirect_port': None,
                         }
 
+                        nsock = socket.socket(
+                            socket.AF_INET, socket.SOCK_RAW, socket.htons(ETH_P_IP))
+                        nsock.setsockopt(
+                            socket.IPPROTO_IP, socket.IP_HDRINCL, 1)
+
+                        if nsock not in message_queues.keys():
+                            message_queues[nsock] = Queue()
+
                         message_queues[nsock].put(msg)
-                        inputs.append(ext_sniff)
+                        # inputs.append(ext_sniff)
                         outputs.append(nsock)
 
                     else:
                         # * handle TCP and UDP
-                        nsock = socket.socket(
-                            socket.AF_INET, socket.SOCK_RAW, socket.htons(ETH_P_IP))
-                        nsock.setsockopt(socket.IPPROTO_IP,
-                                         socket.IP_HDRINCL, 1)
 
                         ip_unpack = struct.unpack(
                             '!BBHHHBBH4s4s', ip_packet[:20])
@@ -304,14 +310,11 @@ if __name__ == '__main__':
                         port_source = port_unpack[0]
                         port_dest = port_unpack[1]
 
-                        if nsock not in message_queues.keys():
-                            message_queues[nsock] = Queue()
-
                         port_translated = getOpenPort('tcp')
-                        addRedirectedTCP(
+                        port_translated = addRedirectedTCP(
                             ip_source, ip_dest, port_source, port_dest, port_translated)
 
-                        print('translating s: ({}, {}) => ({}, {}) to ({},{}) => ({},{})'.format(
+                        print('translating ns: ({}, {}) => ({}, {}) to ({},{}) => ({},{})'.format(
                             ip_source, port_source,
                             ip_dest, port_dest,
                             '10.0.1.1', port_translated,
@@ -324,21 +327,24 @@ if __name__ == '__main__':
                             'priv_to_pub': True,
                             'redirect_port': port_translated,
                         }
+
+                        nsock = socket.socket(
+                            socket.AF_INET, socket.SOCK_RAW, socket.getprotobyname('tcp'))
+                        nsock.setsockopt(socket.IPPROTO_IP,
+                                         socket.IP_HDRINCL, 1)
+                        nsock.bind(('10.0.1.1', port_translated))
+
+                        if nsock not in message_queues.keys():
+                            message_queues[nsock] = Queue()
+
                         message_queues[nsock].put(msg)
-                        # inputs.append(nsock)
+                        inputs.append(nsock)
                         outputs.append(nsock)
 
             else:
                 # * not the initial connection
 
                 if isIP(eth):
-                    # disable external sniffer
-                    inputs.remove(ext_sniff)
-
-                    nsock = socket.socket(
-                        socket.AF_INET, socket.SOCK_RAW, socket.htons(ETH_P_IP))
-                    nsock.setsockopt(socket.IPPROTO_IP, socket.IP_HDRINCL, 1)
-
                     ip_unpack = struct.unpack(
                         '!BBHHHBBH4s4s', ip_packet[:20])
                     pkt_ip_source = socket.inet_ntoa(ip_unpack[8])  # PRIV NET
@@ -351,11 +357,8 @@ if __name__ == '__main__':
                     fromNaptTable = getInternalRequestFromExtPacket(ip_packet)
 
                     if not fromNaptTable:
-                        print('\nrequest to response not found in db')
+                        print('>> request to response not found in db\n')
                         continue
-
-                    if nsock not in message_queues.keys():
-                        message_queues[nsock] = Queue()
 
                     ip_dest = fromNaptTable['ip_src']
                     port_dest = 0
@@ -376,9 +379,33 @@ if __name__ == '__main__':
                         'priv_to_pub': False,
                         'redirect_port': port_dest,
                     }
-                    message_queues[nsock].put(msg)
 
-                    outputs.append(nsock)
+                    sock = None
+                    if isIcmp(ip_packet):
+                        nsock = socket.socket(
+                            socket.AF_INET, socket.SOCK_RAW, socket.getprotobyname('icmp'))
+                        nsock.setsockopt(socket.IPPROTO_IP,
+                                         socket.IP_HDRINCL, 1)
+                        sock = nsock
+
+                    if sock not in message_queues.keys():
+                        message_queues[sock] = Queue()
+                    message_queues[sock].put(msg)
+                    outputs.append(sock)
+                    # message_queues[s].put(msg)
+                    # outputs.append(s)
+
+                    # if nsock:
+                    #     if nsock not in message_queues.keys():
+                    #         message_queues[nsock] = Queue()
+                    #     message_queues[nsock].put(msg)
+                    #     outputs.append(nsock)
+
+                    # if conn:
+                    # if conn not in message_queues.keys():
+                    #     message_queues[conn] = Queue()
+                    # message_queues[conn].put(msg)
+                    # outputs.append(conn)
 
         for w in writable:
             try:
@@ -395,12 +422,15 @@ if __name__ == '__main__':
                     msg['pkt'], new_ip_src, msg['dest'][0], new_port_src)
 
             except queue.Empty as e:
+                print('Queue empty', w)
                 # no more messages from w
                 outputs.remove(w)
+                continue
             else:
                 print('Sending msg to ({}, {})'.format(
                     msg['dest'][0], msg['dest'][1]))
                 w.sendto(msg['pkt'], msg['dest'])
+                print('# MESSAGE SENT')
 
         for e in exceptional:
             inputs.remove(e)
